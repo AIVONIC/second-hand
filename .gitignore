@@ -1,0 +1,11 @@
+# secrets never enter this public repository
+.env
+.env.*
+*.keystore
+local.properties
+# build output
+build/
+.gradle/
+__pycache__/
+.venv/
+node_modules/
