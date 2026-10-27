@@ -8,7 +8,8 @@ Server -> phone
   {"type":"heard","text":"..","final":bool}       what the agent is hearing, live
   {"type":"need_photo"}                           take a photo now: the technician started to speak
   {"type":"answer", say, step, stop, display_original, display_english, job_done, think_s}
-  {"type":"audio_start"} binary MP3 frames {"type":"audio_end"}   the reply, spoken
+  {"type":"audio_start"} binary audio frames {"type":"audio_end"}   the reply, spoken: MP3, or with ?audio=pcm16
+                                                    16 kHz mono 16-bit PCM (little-endian) the phone plays as it comes
   {"type":"outline","part":"..","box":[x1,y1,x2,y2],"w":..,"h":..}   where the part is in the last photo
 
 The key to Meta's API stays here. The phone proves itself with a device token from the environment
@@ -31,7 +32,7 @@ from secondhand.agent import Job, answer, locate
 from secondhand.asr import Ear
 from secondhand.config import setting
 from secondhand.meta import Meta
-from secondhand.voice import speak
+from secondhand.voice import FORMATS, speak
 
 log = logging.getLogger("secondhand")
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
@@ -50,8 +51,9 @@ async def health() -> dict:
 
 
 class Session:
-    def __init__(self, ws: WebSocket) -> None:
+    def __init__(self, ws: WebSocket, audio: str) -> None:
         self.ws = ws
+        self.audio = audio
         self.meta = Meta()
         self.http = httpx.AsyncClient(timeout=httpx.Timeout(30.0, connect=10.0))
         self.job = Job(id=uuid.uuid4().hex[:8])
@@ -81,7 +83,7 @@ class Session:
     async def voice(self, text: str) -> None:
         await self.send({"type": "audio_start"})
         try:
-            async for chunk in speak(self.http, text):
+            async for chunk in speak(self.http, text, self.audio):
                 await self.ws.send_bytes(chunk)
         finally:
             await self.send({"type": "audio_end"})
@@ -114,8 +116,12 @@ async def session(ws: WebSocket) -> None:
     if not admitted(ws.query_params.get("token")):
         await ws.close(code=1008)
         return
+    audio = ws.query_params.get("audio", "mp3")
+    if audio not in FORMATS:
+        await ws.close(code=1003)
+        return
     await ws.accept()
-    s = Session(ws)
+    s = Session(ws, audio)
     ear = Ear()
     await ear.open()
     listener = asyncio.create_task(s.listen(ear))
