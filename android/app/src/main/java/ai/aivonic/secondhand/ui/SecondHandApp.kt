@@ -37,7 +37,7 @@ import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Tab
-import androidx.compose.material3.TabRow
+import androidx.compose.material3.PrimaryTabRow
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.darkColorScheme
@@ -92,7 +92,7 @@ fun SecondHandApp(
           Settings(job) { settings = false }
           return@Column
         }
-        TabRow(selectedTabIndex = tab, containerColor = Ink, contentColor = Amber) {
+        PrimaryTabRow(selectedTabIndex = tab, containerColor = Ink, contentColor = Amber) {
           Tab(selected = tab == 0, onClick = { tab = 0 }, text = { Text("Live") })
           Tab(selected = tab == 1, onClick = { tab = 1 }, text = { Text("Job (${state.steps.size})") })
         }
