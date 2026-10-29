@@ -86,6 +86,21 @@ class Link(private val onMessage: (Heard) -> Unit) {
     )
   }
 
+  /** Write the report now (the same as saying "job done"). */
+  fun sendFinish() {
+    socket?.send(JSONObject().put("type", "finish").toString())
+  }
+
+  /** The report's PDF, fetched with the device token. */
+  fun fetchPdf(server: String, token: String, id: String): ByteArray {
+    val base = server.trim().trimEnd('/').replaceFirst("wss://", "https://").replaceFirst("ws://", "http://")
+    val request = Request.Builder().url("$base/v1/reports/$id.pdf").header("Authorization", "Bearer ${token.trim()}").build()
+    client.newCall(request).execute().use { r ->
+      check(r.isSuccessful) { "The report PDF could not be fetched (HTTP ${r.code})" }
+      return r.body!!.bytes()
+    }
+  }
+
   fun sendText(text: String) {
     socket?.send(JSONObject().put("type", "text").put("text", text).toString())
   }

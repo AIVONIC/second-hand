@@ -5,6 +5,14 @@ import ai.aivonic.secondhand.Glasses
 import ai.aivonic.secondhand.JobModel
 import ai.aivonic.secondhand.JobState
 import ai.aivonic.secondhand.MainActivity
+import ai.aivonic.secondhand.Report
+import android.content.Intent
+import androidx.core.content.FileProvider
+import androidx.compose.ui.platform.LocalContext
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.material3.CircularProgressIndicator
+import kotlinx.coroutines.launch
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
@@ -95,10 +103,14 @@ fun SecondHandApp(
         PrimaryTabRow(selectedTabIndex = tab, containerColor = Ink, contentColor = Amber) {
           Tab(selected = tab == 0, onClick = { tab = 0 }, text = { Text("Live") })
           Tab(selected = tab == 1, onClick = { tab = 1 }, text = { Text("Job (${state.steps.size})") })
+          Tab(selected = tab == 2, onClick = { tab = 2 }, text = { Text("Report") })
         }
+        // "job done": the report screen comes up by itself while the report is written
+        LaunchedEffect(state.reportWriting, state.report?.id) { if (state.reportWriting || state.report != null) tab = 2 }
         when (tab) {
           0 -> Live(job, state, registered, registering, onConnectGlasses, onStartJob)
-          else -> JobLog(state)
+          1 -> JobLog(state)
+          else -> ReportScreen(job, state)
         }
       }
     }
@@ -165,7 +177,10 @@ private fun Live(
     } else {
       Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
         OutlinedButton(onClick = { job.snap() }, enabled = state.glasses == Glasses.Status.READY) { Text("Photo") }
-        OutlinedButton(onClick = { job.endJob() }) { Text("End job") }
+        OutlinedButton(onClick = { job.finish() }, enabled = state.connected && !state.reportWriting && state.answers.isNotEmpty()) {
+          Text("Finish + report")
+        }
+        OutlinedButton(onClick = { job.endJob() }, enabled = !state.reportWriting) { Text("End job") }
       }
     }
 
@@ -299,4 +314,95 @@ private fun JobLog(state: JobState) {
       }
     }
   }
+}
+
+@Composable
+private fun ReportScreen(job: JobModel, state: JobState) {
+  val context = LocalContext.current
+  val scope = rememberCoroutineScope()
+  val r = state.report
+  Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(16.dp)) {
+    state.reportProblem?.let { Text(it, color = StopRed, modifier = Modifier.padding(bottom = 8.dp)) }
+    when {
+      state.reportWriting ->
+          Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.padding(top = 24.dp)) {
+            CircularProgressIndicator(color = Amber, modifier = Modifier.size(28.dp))
+            Spacer(Modifier.width(14.dp))
+            Text("Writing the job report and invoice draft with Muse Spark Open...", color = Muted)
+          }
+      r == null -> Text("Say \"job done\" (or press Finish + report) and the report appears here.", color = Muted)
+      else -> {
+        Text(r.title, fontSize = 21.sp, fontWeight = FontWeight.Bold)
+        Text(listOf(r.site, r.date, "${r.minutes} min on site").filter { it.isNotBlank() }.joinToString("  ·  "), color = Muted, fontSize = 13.sp)
+        Spacer(Modifier.height(10.dp))
+        Text(r.summary, fontSize = 16.sp)
+        Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.padding(vertical = 14.dp)) {
+          Button(onClick = { scope.launch { job.reportPdf()?.let { share(context, it) } } }) { Text("Send PDF") }
+          OutlinedButton(onClick = { scope.launch { job.reportPdf()?.let { open(context, it) } } }) { Text("Open PDF") }
+        }
+        r.referrals.forEach { (issue, who) -> StopBanner("$issue\nCall: $who") }
+        Section("Findings", r.findings)
+        Section("Work done", r.workDone)
+        Section("Follow-up", r.followUp)
+        Section("Parts used", r.parts)
+        InvoiceCard(r.invoice)
+        Text("Written by ${r.model} in %.1f s".format(r.seconds), color = Muted, fontSize = 11.sp, modifier = Modifier.padding(top = 10.dp))
+      }
+    }
+  }
+}
+
+@Composable
+private fun Section(title: String, items: List<String>) {
+  if (items.isEmpty()) return
+  Text(title, color = Amber, fontWeight = FontWeight.Bold, modifier = Modifier.padding(top = 14.dp, bottom = 4.dp))
+  items.forEach { Text("•  $it", modifier = Modifier.padding(bottom = 3.dp)) }
+}
+
+@Composable
+private fun InvoiceCard(inv: Report.Invoice) {
+  fun money(v: Double?) = v?.let { "%,.2f".format(it).replace(',', ' ') } ?: "to add"
+  Card(Modifier.fillMaxWidth().padding(top = 18.dp), shape = RoundedCornerShape(12.dp)) {
+    Column(Modifier.padding(14.dp)) {
+      Text("Invoice draft", color = Amber, fontWeight = FontWeight.Bold)
+      Spacer(Modifier.height(6.dp))
+      inv.lines.forEach { l ->
+        Row(Modifier.fillMaxWidth().padding(vertical = 3.dp)) {
+          Text("${l.text} (${l.quantity})", Modifier.weight(1f), fontSize = 14.sp)
+          Text(money(l.amount), fontSize = 14.sp)
+        }
+      }
+      Spacer(Modifier.height(6.dp))
+      Row(Modifier.fillMaxWidth()) { Text("VAT ${"%.0f".format(inv.vatRate * 100)}%", Modifier.weight(1f), color = Muted); Text(money(inv.vat), color = Muted) }
+      Row(Modifier.fillMaxWidth()) {
+        Text("Total", Modifier.weight(1f), fontWeight = FontWeight.Bold)
+        Text("${money(inv.total)} ${inv.currency}", fontWeight = FontWeight.Bold)
+      }
+      if (inv.partsUnpriced) Text("Part prices to be added by the office.", color = Muted, fontSize = 12.sp, modifier = Modifier.padding(top = 6.dp))
+    }
+  }
+}
+
+private fun uri(context: android.content.Context, file: java.io.File) =
+    FileProvider.getUriForFile(context, "${context.packageName}.files", file)
+
+/** The share sheet: WhatsApp, email, anything that takes a PDF. */
+private fun share(context: android.content.Context, file: java.io.File) {
+  val send =
+      Intent(Intent.ACTION_SEND).apply {
+        type = "application/pdf"
+        putExtra(Intent.EXTRA_STREAM, uri(context, file))
+        putExtra(Intent.EXTRA_SUBJECT, "Job report")
+        addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+      }
+  context.startActivity(Intent.createChooser(send, "Send the job report"))
+}
+
+private fun open(context: android.content.Context, file: java.io.File) {
+  val view =
+      Intent(Intent.ACTION_VIEW).apply {
+        setDataAndType(uri(context, file), "application/pdf")
+        addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+      }
+  runCatching { context.startActivity(view) }
 }

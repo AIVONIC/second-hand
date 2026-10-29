@@ -10,6 +10,7 @@ import android.util.Log
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import java.io.ByteArrayOutputStream
+import java.io.File
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.delay
@@ -47,6 +48,9 @@ data class JobState(
     val photo: Bitmap? = null,
     val outlined: String? = null,
     val done: Boolean = false,
+    val reportWriting: Boolean = false,
+    val report: Report? = null,
+    val reportProblem: String? = null,
 )
 
 /**
@@ -130,6 +134,28 @@ class JobModel(app: Application) : AndroidViewModel(app) {
     _state.update { it.copy(connected = false, connecting = false, mic = "none", speaking = false, thinking = false) }
   }
 
+  /** Write the job report now, without saying "job done". */
+  fun finish() {
+    _state.update { it.copy(reportWriting = true, reportProblem = null) }
+    link.sendFinish()
+  }
+
+  /** The report as a PDF on this phone, to open or share (fetched once, then kept in the cache). */
+  suspend fun reportPdf(): File? {
+    val r = _state.value.report ?: return null
+    val file = File(getApplication<Application>().cacheDir, "reports/second-hand-job-${r.id}.pdf")
+    if (file.exists()) return file
+    return try {
+      val bytes = withContext(Dispatchers.IO) { link.fetchPdf(server, token, r.id) }
+      file.parentFile?.mkdirs()
+      file.writeBytes(bytes)
+      file
+    } catch (e: Exception) {
+      _state.update { it.copy(reportProblem = e.message ?: "$e") }
+      null
+    }
+  }
+
   fun ask(text: String) {
     if (text.isBlank()) return
     lastHeard = text.trim()
@@ -165,7 +191,15 @@ class JobModel(app: Application) : AndroidViewModel(app) {
     when (msg) {
       Heard.Open -> _state.update { it.copy(connected = true, connecting = false, problem = null) }
       is Heard.Closed -> {
-        _state.update { it.copy(connected = false, connecting = false, problem = msg.reason) }
+        _state.update {
+          it.copy(
+              connected = false,
+              connecting = false,
+              problem = msg.reason,
+              reportWriting = false,
+              reportProblem = if (it.reportWriting) "The connection closed before the report arrived" else it.reportProblem,
+          )
+        }
         fallback.stop()
         glasses.stop()
       }
@@ -203,6 +237,13 @@ class JobModel(app: Application) : AndroidViewModel(app) {
           )
         }
       }
+      "report_writing" -> _state.update { it.copy(reportWriting = true, reportProblem = null, done = true) }
+      "report" ->
+          _state.update {
+            val r = runCatching { Report.parse(m) }
+            it.copy(reportWriting = false, report = r.getOrNull(), reportProblem = r.exceptionOrNull()?.let { e -> "The report could not be read: ${e.message}" })
+          }
+      "report_failed" -> _state.update { it.copy(reportWriting = false, reportProblem = "The report failed: ${m.optString("reason")}") }
       "audio_start" -> {
         muted = true
         withContext(Dispatchers.IO) { speaker.begin() }
