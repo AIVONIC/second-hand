@@ -11,6 +11,11 @@ Server -> phone
   {"type":"audio_start"} binary audio frames {"type":"audio_end"}   the reply, spoken: MP3, or with ?audio=pcm16
                                                     16 kHz mono 16-bit PCM (little-endian) the phone plays as it comes
   {"type":"outline","part":"..","box":[x1,y1,x2,y2],"w":..,"h":..}   where the part is in the last photo
+  {"type":"report_writing"} then {"type":"report", ..}   the job report and invoice draft, when the job is done
+                                                    (or {"type":"report_failed","reason":..}); the PDF is
+                                                    GET /v1/reports/<id>.pdf with "Authorization: Bearer <token>"
+Phone -> server, also
+  {"type":"finish"}                               write the report now (the same as saying "job done")
 
 The key to Meta's API stays here. The phone proves itself with a device token from the environment
 (SECONDHAND_DEVICE_TOKEN); with no token configured the server admits nobody."""
@@ -26,8 +31,10 @@ import time
 import uuid
 
 import httpx
-from fastapi import FastAPI, WebSocket, WebSocketDisconnect
+from fastapi import FastAPI, Header, HTTPException, WebSocket, WebSocketDisconnect
+from fastapi.responses import FileResponse
 
+from secondhand import report
 from secondhand.agent import Job, answer, locate
 from secondhand.asr import Ear
 from secondhand.config import setting
@@ -50,6 +57,17 @@ async def health() -> dict:
     return {"ok": True}
 
 
+@app.get("/v1/reports/{job_id}.pdf")
+async def report_pdf(job_id: str, authorization: str | None = Header(default=None)) -> FileResponse:
+    token = authorization.removeprefix("Bearer ").strip() if authorization else None
+    if not admitted(token):
+        raise HTTPException(401)
+    path = report.REPORTS_DIR / f"{job_id}.pdf"
+    if not (len(job_id) == 8 and all(c in "0123456789abcdef" for c in job_id)) or not path.exists():
+        raise HTTPException(404)
+    return FileResponse(path, media_type="application/pdf", filename=f"second-hand-job-{job_id}.pdf")
+
+
 class Session:
     def __init__(self, ws: WebSocket, audio: str) -> None:
         self.ws = ws
@@ -60,6 +78,10 @@ class Session:
         self.photo: tuple[bytes, int, int, float] | None = None  # jpeg, w, h, when
         self.asked_at = 0.0
         self.busy = asyncio.Lock()
+        self.started = time.time()  # wall clock: the report's labour time
+        self.shots: list[report.Shot] = []
+        self.last_shot: tuple[bytes, float] | None = None  # the latest photo a turn used: the "after" shot
+        self.reporting = False
 
     async def send(self, msg: dict) -> None:
         await self.ws.send_text(json.dumps(msg))
@@ -75,10 +97,38 @@ class Session:
             log.info("job %s heard=%r say=%r stop=%r point=%r think=%.1fs", self.job.id, heard, t.say, t.stop,
                      t.point_at, t.think_s)
             await self.send({"type": "answer", **{k: v for k, v in t.__dict__.items()}})
+            if photo:
+                self.last_shot = (photo[0], time.time())
+                if not self.shots or t.step or t.stop:
+                    self.shots.append(report.Shot(photo[0], time.time(), t.stop or t.step or "Start of the job"))
             tasks = [self.voice(t.say)]
             if t.point_at and photo:
                 tasks.append(self.outline(t.point_at, photo))
             await asyncio.gather(*tasks)
+        if t.job_done:
+            await self.finish()
+
+    async def finish(self) -> None:
+        """Write the job report and the invoice draft, once per job."""
+        if self.reporting:
+            return
+        self.reporting = True
+        await self.send({"type": "report_writing"})
+        shots = list(self.shots)
+        if self.last_shot and (not shots or shots[-1].jpeg is not self.last_shot[0]):
+            shots.append(report.Shot(self.last_shot[0], self.last_shot[1], "End of the job"))
+        try:
+            r = await report.write(self.http, self.meta, self.job, shots, self.started)
+            pdf = await asyncio.to_thread(report.render, r)
+            await asyncio.to_thread(report.save, r, pdf)
+        except Exception as e:  # the phone must hear about it: a silent failure looks like a slow model
+            log.exception("job %s: report failed", self.job.id)
+            self.reporting = False
+            await self.send({"type": "report_failed", "reason": f"{type(e).__name__}: {e}"[:300]})
+            return
+        log.info("job %s report by %s in %.1fs: %d bytes, %d photos", self.job.id, r.model, r.seconds, len(pdf),
+                 len(r.shots))
+        await self.send({"type": "report", **r.summary()})
 
     async def voice(self, text: str) -> None:
         await self.send({"type": "audio_start"})
@@ -135,6 +185,8 @@ async def session(ws: WebSocket) -> None:
                 m = json.loads(msg["text"])
                 if m.get("type") == "photo":
                     s.photo = (base64.b64decode(m["jpeg"]), int(m["w"]), int(m["h"]), time.monotonic())
+                elif m.get("type") == "finish":
+                    asyncio.create_task(s.finish())
                 elif m.get("type") == "text" and m.get("text", "").strip():
                     s.asked_at = time.monotonic()
                     asyncio.create_task(s.turn(m["text"].strip()))
