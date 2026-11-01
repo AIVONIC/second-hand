@@ -31,7 +31,9 @@ phone once; it is never built into the APK, which anyone can download from this 
 
 ## Status
 
-Day 2. The voice loop runs end to end on the server, and the Android app is built (not yet tried on the glasses).
+The server runs end to end (hear, think, speak, outline the part, the job report and invoice draft as a PDF), and
+the Android app is built with its live screen, job log and Report tab. First run on the glasses and the demo video
+are next.
 
 ## License
 
