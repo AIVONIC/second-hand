@@ -182,7 +182,9 @@ class JobModel(app: Application) : AndroidViewModel(app) {
 
   private fun onMic(pcm: ByteArray) {
     link.sendAudio(if (muted) ByteArray(pcm.size) else pcm)
-    film?.mic(pcm)
+    // while the agent speaks the glasses' microphone hears its voice from their speakers: the film has the clean
+    // copy already, so the microphone is left out then, or the film echoes
+    film?.mic(if (muted) ByteArray(pcm.size) else pcm)
   }
 
   /** Close the film (after the glasses have stopped, so no frame arrives mid-close) and put it in Movies. */
