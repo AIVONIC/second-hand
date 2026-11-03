@@ -4,9 +4,14 @@ part on the phone. When the next step needs a licensed or certified professional
 
 from __future__ import annotations
 
+import logging
 from dataclasses import dataclass, field
 
+import httpx
+
 from secondhand.meta import Box, Meta, image_part
+
+log = logging.getLogger("secondhand.agent")
 
 SYSTEM = """You are Emma, the coworker who lives in the technician's Ray-Ban Meta glasses (the product is called
 Second Hand). You see what they see (the photo with each question) and you speak into their ear while their hands
@@ -135,7 +140,14 @@ async def locate(meta: Meta, photo: bytes, width: int, height: int, part: str) -
                                       LOCATE_SCHEMA, "box")
     if not rough["found"]:
         return None, s1
-    hint = Box(int(rough["x1"] * width / 1000), int(rough["y1"] * height / 1000),
-               int(rough["x2"] * width / 1000), int(rough["y2"] * height / 1000))
-    tight, s2 = await meta.sam_box(photo, width, height, hint)
+    # SAM 3.1 refuses (400) a box that is not inside the pixels, 0..width-1 by 0..height-1 with x1 <= x2, and the
+    # 0-1000 scale reaches width exactly for a part that touches the edge of the photo
+    xs = sorted(min(max(int(rough[k] * width / 1000), 0), width - 1) for k in ("x1", "x2"))
+    ys = sorted(min(max(int(rough[k] * height / 1000), 0), height - 1) for k in ("y1", "y2"))
+    hint = Box(xs[0], ys[0], xs[1], ys[1])
+    try:
+        tight, s2 = await meta.sam_box(photo, width, height, hint)
+    except httpx.HTTPError as e:
+        log.warning("SAM 3.1 refused %s for %r: %s; showing the rough box", hint.as_list(), part, e)
+        return hint, s1
     return tight or hint, s1 + s2
