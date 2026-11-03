@@ -51,6 +51,9 @@ data class JobState(
     val reportWriting: Boolean = false,
     val report: Report? = null,
     val reportProblem: String? = null,
+    val filming: Boolean = false,
+    val film: String? = null,
+    val filmProblem: String? = null,
 )
 
 /**
@@ -70,6 +73,11 @@ class JobModel(app: Application) : AndroidViewModel(app) {
   var token: String
     get() = prefs.getString("token", "") ?: ""
     set(v) = prefs.edit().putString("token", v.trim()).apply()
+  /** Film the glasses' view during the job (the glasses cannot record themselves while the app holds the camera). */
+  var filmJobs: Boolean
+    get() = prefs.getBoolean("film", true)
+    set(v) = prefs.edit().putBoolean("film", v).apply()
+  private var film: Recorder? = null
 
   // one reader, in arrival order: the reply's audio chunks must reach the speaker in sequence
   private val inbox = Channel<Heard>(Channel.UNLIMITED)
@@ -96,9 +104,11 @@ class JobModel(app: Application) : AndroidViewModel(app) {
     }
     _state.value = JobState(connecting = true)
     link.open(server, token)
+    film = if (useGlasses && filmJobs) Recorder(getApplication()) else null
+    _state.update { it.copy(filming = film != null) }
     viewModelScope.launch {
       if (useGlasses) {
-        glasses.start(withAudio = glassesMic)
+        glasses.start(withAudio = glassesMic, film = film)
         // the glasses' microphone arrives inside the stream; if none has come three seconds after the stream
         // started (not granted, or not supported), fall back to Bluetooth hands-free or the phone
         waitFor(15_000) { _state.value.glasses == Glasses.Status.READY }
@@ -131,6 +141,7 @@ class JobModel(app: Application) : AndroidViewModel(app) {
     glasses.stop()
     fallback.stop()
     speaker.end()
+    saveFilm()
     _state.update { it.copy(connected = false, connecting = false, mic = "none", speaking = false, thinking = false) }
   }
 
@@ -171,6 +182,23 @@ class JobModel(app: Application) : AndroidViewModel(app) {
 
   private fun onMic(pcm: ByteArray) {
     link.sendAudio(if (muted) ByteArray(pcm.size) else pcm)
+    film?.mic(pcm)
+  }
+
+  /** Close the film (after the glasses have stopped, so no frame arrives mid-close) and put it in Movies. */
+  private fun saveFilm() {
+    val f = film ?: return
+    film = null
+    viewModelScope.launch {
+      val result = withContext(Dispatchers.IO) { runCatching { f.finish() } }
+      _state.update {
+        it.copy(
+            filming = false,
+            film = result.getOrNull(),
+            filmProblem = result.exceptionOrNull()?.let { e -> "The film was not saved: ${e.message}" },
+        )
+      }
+    }
   }
 
   private suspend fun sendPhoto() {
@@ -202,8 +230,12 @@ class JobModel(app: Application) : AndroidViewModel(app) {
         }
         fallback.stop()
         glasses.stop()
+        saveFilm()
       }
-      is Heard.Audio -> withContext(Dispatchers.IO) { speaker.write(msg.bytes) }
+      is Heard.Audio -> withContext(Dispatchers.IO) {
+        speaker.write(msg.bytes)
+        film?.speaker(msg.bytes)
+      }
       is Heard.Text -> onEvent(msg.msg)
     }
   }

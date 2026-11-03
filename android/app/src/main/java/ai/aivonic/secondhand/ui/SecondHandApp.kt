@@ -43,6 +43,7 @@ import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.Switch
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Tab
 import androidx.compose.material3.PrimaryTabRow
@@ -159,6 +160,8 @@ private fun Live(
     StatusRow(state, registered)
     state.problem?.let { Text(it, color = StopRed, modifier = Modifier.padding(top = 6.dp)) }
     state.glassesProblem?.let { Text("Glasses: $it", color = Muted, fontSize = 13.sp) }
+    state.film?.let { Text("Film saved: $it", color = Ok, fontSize = 13.sp, modifier = Modifier.padding(top = 4.dp)) }
+    state.filmProblem?.let { Text(it, color = StopRed, fontSize = 13.sp, modifier = Modifier.padding(top = 4.dp)) }
     Spacer(Modifier.height(12.dp))
 
     if (!running) {
@@ -173,6 +176,17 @@ private fun Live(
       }
       OutlinedButton(onClick = { onStartJob(false) }, modifier = Modifier.fillMaxWidth().padding(top = 8.dp)) {
         Text("Start without glasses (phone microphone)")
+      }
+      var film by remember { mutableStateOf(job.filmJobs) }
+      Row(Modifier.fillMaxWidth().padding(top = 12.dp), verticalAlignment = Alignment.CenterVertically) {
+        Column(Modifier.weight(1f)) {
+          Text("Film the glasses' view")
+          Text("720p from the glasses, with both voices, saved to Movies/Second Hand", color = Muted, fontSize = 12.sp)
+        }
+        Switch(checked = film, onCheckedChange = {
+          film = it
+          job.filmJobs = it
+        })
       }
     } else {
       Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -228,6 +242,7 @@ private fun StatusRow(state: JobState, registered: Boolean) {
           Glasses.Status.OFF -> if (registered) Muted else Color.DarkGray
         }
     Dot("Glasses", g)
+    if (state.filming) Dot("REC", StopRed)
     Text("Mic: ${state.mic}", color = Muted, fontSize = 12.sp)
   }
 }

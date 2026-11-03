@@ -50,7 +50,8 @@ class Glasses(private val scope: CoroutineScope, private val onAudio: (ByteArray
   private var camera: Camera? = null
   private val jobs = mutableListOf<Job>()
 
-  fun start(withAudio: Boolean) {
+  /** [film]: when set, the stream runs at 720p, 24 fps, and every frame goes to it as well. */
+  fun start(withAudio: Boolean, film: Recorder? = null) {
     if (session != null) return
     audioArrived = false
     _error.value = null
@@ -63,7 +64,7 @@ class Glasses(private val scope: CoroutineScope, private val onAudio: (ByteArray
             created.state.collect { state ->
               Log.i(TAG, "session $state")
               // a capability can only be added once the session has started
-              if (state == DeviceSessionState.STARTED && camera == null) attachCamera(created, withAudio)
+              if (state == DeviceSessionState.STARTED && camera == null) attachCamera(created, withAudio, film)
               if (state == DeviceSessionState.STOPPED) teardown(Status.STOPPED)
             }
           }
@@ -75,19 +76,20 @@ class Glasses(private val scope: CoroutineScope, private val onAudio: (ByteArray
         }
   }
 
-  private fun attachCamera(session: DeviceSession, withAudio: Boolean) {
+  private fun attachCamera(session: DeviceSession, withAudio: Boolean, film: Recorder?) {
     session
         .addCamera(
             StreamConfiguration(
                 audioCodec = if (withAudio) AudioCodec.PCM(AudioSampleRate.RATE_16000, 1) else null,
-                videoQuality = VideoQuality.LOW,
-                frameRate = 7,
+                videoQuality = if (film != null) VideoQuality.HIGH else VideoQuality.LOW,
+                frameRate = if (film != null) 24 else 7,
                 compressVideo = true,
             ),
         )
         .onSuccess { added ->
           camera = added
           if (withAudio) jobs += scope.launch(Dispatchers.IO) { added.stream.audioStream.collect(::receive) }
+          if (film != null) jobs += scope.launch(Dispatchers.IO) { added.stream.videoStream.collect(film::video) }
           jobs += scope.launch {
             added.stream.state.collect { state ->
               Log.i(TAG, "stream $state")
