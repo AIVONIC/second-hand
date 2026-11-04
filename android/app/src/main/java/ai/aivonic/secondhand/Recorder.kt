@@ -46,6 +46,7 @@ class Recorder(private val context: Context) {
   private var mixStart = 0L // the sample index of mix[0]
   private var emitted = 0L // the next sample to encode
   private var micAt = 0L
+  private var micStarted = false
   private var speakerAt = 0L
 
   val started: Boolean
@@ -93,8 +94,11 @@ class Recorder(private val context: Context) {
     synchronized(lock) {
       if (muxer == null || closed) return
       val now = now()
-      // arrives in real time: continue where the last chunk ended unless the stream had a gap
-      val at = if (kotlin.math.abs(micAt - now) > SAMPLE_RATE * 3L / 10) now else micAt
+      // the microphone shares the radio link with the video, so it arrives in bursts: a stalled second comes all at
+      // once. Lay it end to end by its own sample count (by arrival time a burst lands on top of itself and the words
+      // turn to mush); start again at now only when it has fallen behind what is already encoded.
+      val at = if (!micStarted || micAt < emitted) now else micAt
+      micStarted = true
       micAt = at + add(at, pcm)
       encodeUpTo(now - LAG)
     }
@@ -286,7 +290,7 @@ class Recorder(private val context: Context) {
     private const val TAG = "SecondHand.Film"
     private const val MIX_SECONDS = 20
     private const val CHUNK_SAMPLES = 1024
-    private const val LAG = SAMPLE_RATE / 2L // half a second: room for both voices to arrive before encoding
+    private const val LAG = SAMPLE_RATE * 3L / 2 // 1.5 s: room for a stalled burst of microphone to arrive before encoding
   }
 }
 
