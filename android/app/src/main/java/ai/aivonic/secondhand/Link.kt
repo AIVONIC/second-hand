@@ -52,10 +52,13 @@ class Link(private val onMessage: (Heard) -> Unit) {
 
               override fun onClosing(webSocket: WebSocket, code: Int, reason: String) {
                 webSocket.close(1000, null)
+                if (webSocket !== socket) return // we closed it (End job): nothing to report
                 onMessage(Heard.Closed(closedBecause(code, reason)))
               }
 
               override fun onFailure(webSocket: WebSocket, t: Throwable, response: Response?) {
+                // after End job the socket we closed can still fail ("Software caused connection abort"): not news
+                if (webSocket !== socket) return
                 // the server refuses a wrong token by closing before the handshake completes: HTTP 403
                 val why = if (response?.code == 403) "The server refused the device token" else (t.message ?: "$t")
                 onMessage(Heard.Closed(why))

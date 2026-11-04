@@ -290,7 +290,7 @@ class Recorder(private val context: Context) {
     private const val TAG = "SecondHand.Film"
     private const val MIX_SECONDS = 20
     private const val CHUNK_SAMPLES = 1024
-    private const val LAG = SAMPLE_RATE * 3L / 2 // 1.5 s: room for a stalled burst of microphone to arrive before encoding
+    private const val LAG = SAMPLE_RATE * 4L // 4 s: the microphone stalls up to ~2 s on the radio link; room to arrive before encoding
   }
 }
 
