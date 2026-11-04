@@ -16,6 +16,8 @@ commit history is the record: the first commit is the empty repository on the fi
 - **Ray-Ban Meta glasses** through the Wearables Device Access Toolkit (camera, photo capture)
 - **Muse Spark** (Meta Model API): reasons over what the glasses see and the job so far
 - **SAM 3.1** (Meta Model API): segments the part the agent is talking about
+- **Muse Voice Transcribe** (Meta Model API): hears the technician in realtime and finds where each question ends
+- **Muse Spark Open** (Meta's open-weight model, served on Baseten): writes the job report and invoice draft
 
 ## How it fits together
 
@@ -31,9 +33,11 @@ phone once; it is never built into the APK, which anyone can download from this 
 
 ## Status
 
-The server runs end to end (hear, think, speak, outline the part, the job report and invoice draft as a PDF), and
-the Android app is built with its live screen, job log and Report tab. First run on the glasses and the demo video
-are next.
+Working end to end on Ray-Ban Meta glasses: it hears the question, answers in the glasses, outlines the part on the
+phone, says stop before work that needs a licensed electrician, films the wearer's view, and writes the job report
+and invoice draft as a PDF when the job is done.
+
+Demo video (a real job, in real time, no cuts): https://youtu.be/WYckjCH-F9U
 
 ## License
 
