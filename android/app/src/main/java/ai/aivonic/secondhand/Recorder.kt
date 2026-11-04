@@ -26,7 +26,8 @@ import java.util.Locale
 class Recorder(private val context: Context) {
   private val lock = Any()
   private val name = "second-hand-" + SimpleDateFormat("yyyyMMdd-HHmmss", Locale.ROOT).format(Date()) + ".mp4"
-  private val file = File(context.getExternalFilesDir(Environment.DIRECTORY_MOVIES) ?: context.cacheDir, name)
+  /** The film itself, kept in the app's own folder so it can always be shared, whatever happens to the Movies copy. */
+  val file = File(context.getExternalFilesDir(Environment.DIRECTORY_MOVIES) ?: context.cacheDir, name)
 
   private var muxer: MediaMuxer? = null
   private var aac: MediaCodec? = null
@@ -260,7 +261,7 @@ class Recorder(private val context: Context) {
     muxer = null
   }
 
-  /** Copy the film into the shared Movies folder; the private copy is removed once the copy is complete. */
+  /** Copy the film into the shared Movies folder; the private copy stays, for Share film. */
   private fun publish(): String {
     val resolver = context.contentResolver
     val values =
@@ -272,17 +273,16 @@ class Recorder(private val context: Context) {
         }
     val uri =
         resolver.insert(MediaStore.Video.Media.EXTERNAL_CONTENT_URI, values)
-            ?: return "the app's own folder: ${file.path}"
+            ?: return "the app's own folder (Movies refused the file)"
     return try {
       resolver.openOutputStream(uri)?.use { out -> file.inputStream().use { it.copyTo(out) } }
           ?: error("could not write to Movies")
       resolver.update(uri, ContentValues().apply { put(MediaStore.Video.Media.IS_PENDING, 0) }, null, null)
-      file.delete()
       "Movies/Second Hand/$name"
     } catch (e: Exception) {
       Log.e(TAG, "film copy", e)
       runCatching { resolver.delete(uri, null, null) }
-      "the app's own folder: ${file.path}"
+      "the app's own folder (Movies failed: ${e.message})"
     }
   }
 

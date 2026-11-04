@@ -1,4 +1,7 @@
 <?xml version="1.0" encoding="utf-8"?>
 <paths>
     <cache-path name="reports" path="reports/" />
+    <!-- the films (Recorder.file): the app's own Movies folder, or the cache when there is no external storage -->
+    <external-files-path name="films" path="Movies/" />
+    <cache-path name="films-cache" path="." />
 </paths>

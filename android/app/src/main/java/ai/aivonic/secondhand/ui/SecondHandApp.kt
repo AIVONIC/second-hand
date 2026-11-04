@@ -161,6 +161,12 @@ private fun Live(
     state.problem?.let { Text(it, color = StopRed, modifier = Modifier.padding(top = 6.dp)) }
     state.glassesProblem?.let { Text("Glasses: $it", color = Muted, fontSize = 13.sp) }
     state.film?.let { Text("Film saved: $it", color = Ok, fontSize = 13.sp, modifier = Modifier.padding(top = 4.dp)) }
+    state.filmFile?.let { file ->
+      val context = LocalContext.current
+      OutlinedButton(onClick = { shareFilm(context, file) }, modifier = Modifier.padding(top = 4.dp)) {
+        Text("Share film (%.0f MB)".format(file.length() / 1e6))
+      }
+    }
     state.filmProblem?.let { Text(it, color = StopRed, fontSize = 13.sp, modifier = Modifier.padding(top = 4.dp)) }
     Spacer(Modifier.height(12.dp))
 
@@ -411,6 +417,17 @@ private fun share(context: android.content.Context, file: java.io.File) {
         addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
       }
   context.startActivity(Intent.createChooser(send, "Send the job report"))
+}
+
+/** The share sheet for the film: Google Drive, WhatsApp, anything that takes a video. */
+private fun shareFilm(context: android.content.Context, file: java.io.File) {
+  val send =
+      Intent(Intent.ACTION_SEND).apply {
+        type = "video/mp4"
+        putExtra(Intent.EXTRA_STREAM, uri(context, file))
+        addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+      }
+  context.startActivity(Intent.createChooser(send, "Share the film"))
 }
 
 private fun open(context: android.content.Context, file: java.io.File) {

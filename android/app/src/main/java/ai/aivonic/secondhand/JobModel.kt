@@ -54,6 +54,7 @@ data class JobState(
     val filming: Boolean = false,
     val film: String? = null,
     val filmProblem: String? = null,
+    val filmFile: java.io.File? = null,
 )
 
 /**
@@ -197,6 +198,7 @@ class JobModel(app: Application) : AndroidViewModel(app) {
         it.copy(
             filming = false,
             film = result.getOrNull(),
+            filmFile = if (result.isSuccess && f.file.length() > 0) f.file else null,
             filmProblem = result.exceptionOrNull()?.let { e -> "The film was not saved: ${e.message}" },
         )
       }
